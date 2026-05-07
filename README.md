@@ -12,7 +12,7 @@ Estação meteorológica simulada no **Wokwi** com ESP32, sensores DHT22, LDR e 
 ## 🏗️ Arquitetura
 
 ```
-Wokwi (ESP32) → MQTT → HiveMQ Cloud → Node-RED → Dashboard
+Wokwi (ESP32 MicroPython) → MQTT → HiveMQ Cloud → Node-RED → Dashboard
                 ↑
         OpenWeatherMap API (dados reais Suzano/BR)
 ```
@@ -22,9 +22,9 @@ Wokwi (ESP32) → MQTT → HiveMQ Cloud → Node-RED → Dashboard
 ```
 📦 estacao-meteorologica-iot
  ┣ 📂 codigos-wokwi
- ┃ ┣ 📄 sketch.ino          → Firmware do ESP32 (Arduino C)
- ┃ ┣ 📄 diagram.json        → Conexões dos componentes no Wokwi
- ┃ ┗ 📄 libraries.txt       → Bibliotecas necessárias
+ ┃ ┣ 📄 main.py             → Firmware do ESP32 em MicroPython
+ ┃ ┣ 📄 ssd1306.py          → Driver do display OLED
+ ┃ ┗ 📄 diagram.json        → Conexões dos componentes no Wokwi
  ┣ 📂 codigos-node-red
  ┃ ┣ 📄 flow_nos.json       → Flow completo para importar no Node-RED
  ┃ ┗ 📄 dashboard_layout.html → HTML/CSS do nó Dashboard Visual
@@ -35,7 +35,7 @@ Wokwi (ESP32) → MQTT → HiveMQ Cloud → Node-RED → Dashboard
 
 | Tecnologia | Versão | Uso |
 |---|---|---|
-| Arduino C (ESP32) | — | Firmware do microcontrolador |
+| MicroPython | v1.21.0 | Firmware do ESP32 |
 | Wokwi | — | Simulador de hardware online |
 | HiveMQ Cloud | Free | Broker MQTT (porta 8883 TLS) |
 | OpenWeatherMap API | v2.5 | Dados climáticos reais |
@@ -46,7 +46,7 @@ Wokwi (ESP32) → MQTT → HiveMQ Cloud → Node-RED → Dashboard
 
 | Componente | Pino | Protocolo | Função |
 |---|---|---|---|
-| ESP32 DevKit v1 | — | — | Microcontrolador principal com Wi-Fi |
+| ESP32 DevKit C v4 | — | — | Microcontrolador principal com Wi-Fi |
 | OLED SSD1306 128x64 | GPIO21 (SDA) / GPIO22 (SCL) | I2C | Display com 4 telas alternáveis |
 | DHT22 | GPIO4 | Digital | Temperatura e Umidade |
 | LDR (Photoresistor) | GPIO34 (ADC) | Analógico | Luminosidade (0–100%) |
@@ -71,7 +71,7 @@ Wokwi (ESP32) → MQTT → HiveMQ Cloud → Node-RED → Dashboard
 | `estacao/umidade` | Umidade sensor DHT22 (%) |
 | `estacao/luminosidade` | Luminosidade LDR (%) |
 | `estacao/gas` | Qualidade do ar MQ-2 (%) |
-| `estacao/previsao` | Previsão calculada (ex: Nublado, Ensolarado) |
+| `estacao/previsao` | Previsão calculada (ex: Noite Nublada, Ensolarado) |
 | `estacao/conforto` | Índice de conforto (ex: Confortável, Atenção) |
 | `estacao/api/temperatura` | Temperatura real API (°C) |
 | `estacao/api/umidade` | Umidade real API (%) |
@@ -117,29 +117,28 @@ Wokwi (ESP32) → MQTT → HiveMQ Cloud → Node-RED → Dashboard
 ### 3️⃣ Configurar o Wokwi
 
 1. Acesse [wokwi.com](https://wokwi.com) → **New Project → ESP32**
-2. Cole o conteúdo de `codigos-wokwi/sketch.ino` na aba de código
-3. Cole o conteúdo de `codigos-wokwi/diagram.json` na aba **diagram.json**
-4. Cole o conteúdo de `codigos-wokwi/libraries.txt` no **libraries.txt**
-5. No topo do `sketch.ino` substitua as credenciais:
+2. Cole o conteúdo de `codigos-wokwi/main.py` na aba de código
+3. Crie uma nova aba chamada `ssd1306.py` e cole o conteúdo do arquivo
+4. Cole o conteúdo de `codigos-wokwi/diagram.json` na aba **diagram.json**
+5. No topo do `main.py` substitua as credenciais:
 
-```cpp
-const char* MQTT_HOST = "SEU_CLUSTER.hivemq.cloud"; // ← Cluster URL do HiveMQ
-const char* MQTT_USER = "SEU_USUARIO_HIVEMQ";        // ← Usuário criado
-const char* MQTT_PASS = "SUA_SENHA_HIVEMQ";          // ← Senha
-const char* OWM_KEY   = "SUA_API_KEY_OPENWEATHERMAP"; // ← API Key
-const char* OWM_CITY  = "SuaCidade,BR";               // ← Sua cidade
+```python
+MQTT_HOST = "SEU_CLUSTER.hivemq.cloud"  # ← Cluster URL do HiveMQ
+MQTT_USER = "SEU_USUARIO_HIVEMQ"         # ← Usuário criado
+MQTT_PASS = "SUA_SENHA_HIVEMQ"           # ← Senha
+OWM_KEY   = "SUA_API_KEY_OPENWEATHERMAP" # ← API Key
+OWM_CITY  = "SuaCidade,BR"               # ← Sua cidade
 ```
 
 6. Clique em **▶ Play** e aguarde ~30 segundos
 
 **✅ Serial Monitor deve mostrar:**
 ```
-Iniciando...
-Wire OK
+I2C scan: [60]
 OLED OK!
-WiFi OK!
-Conectando MQTT... OK!
-API OK! Previsao: Nublado
+WiFi OK! IP: 10.10.0.2
+MQTT OK!
+API OK! Previsao: Noite Nublada
 DADOS ENVIADOS VIA MQTT
 ```
 
@@ -186,7 +185,7 @@ Design dark mode com três seções:
 
 - **Dados Reais (OpenWeatherMap):** temperatura, condição climática, sensação térmica, umidade, pressão e vento de Suzano/SP
 - **Sensor ESP32 (Simulação Wokwi):** temperatura, umidade, luminosidade e qualidade do ar com cores dinâmicas
-- **Previsão e Conforto:** previsão calculada e índice de conforto térmico
+- **Previsão e Conforto:** previsão calculada com identificação dia/noite e índice de conforto térmico
 
 ---
 

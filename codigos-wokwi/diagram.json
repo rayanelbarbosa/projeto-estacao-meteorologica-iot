@@ -3,30 +3,36 @@
   "author": "Estacao Meteorologica",
   "editor": "wokwi",
   "parts": [
-    { "type": "wokwi-esp32-devkit-v1", "id": "esp", "top": 0, "left": 0, "attrs": {} },
-    { "type": "wokwi-ssd1306", "id": "oled1", "top": -180, "left": 0, "attrs": { "i2cAddress": "0x3c" } },
-    { "type": "wokwi-dht22", "id": "dht1", "top": -60, "left": 220, "attrs": { "temperature": "25", "humidity": "60" } },
-    { "type": "wokwi-photoresistor-sensor", "id": "ldr1", "top": 80, "left": 220, "attrs": { "pin": "34" } },
-    { "type": "wokwi-mq2-gas-sensor", "id": "mq2", "top": 180, "left": 220, "attrs": { "pin": "35" } },
-    { "type": "wokwi-pushbutton", "id": "btn1", "top": 120, "left": -100, "attrs": { "color": "green" } }
+    {
+      "type": "board-esp32-devkit-c-v4",
+      "id": "esp",
+      "top": 80,
+      "left": -10,
+      "attrs": { "env": "micropython-20231005-v1.21.0" }
+    },
+    { "type": "board-ssd1306", "id": "oled1", "top": -120, "left": -10, "attrs": {} },
+    { "type": "wokwi-dht22", "id": "dht1", "top": 0, "left": 230, "attrs": { "temperature": "25", "humidity": "60" } },
+    { "type": "wokwi-photoresistor-sensor", "id": "ldr1", "top": 140, "left": 230, "attrs": { "pin": "34" } },
+    { "type": "wokwi-mq2-gas-sensor", "id": "mq2", "top": 260, "left": 230, "attrs": { "pin": "35" } },
+    { "type": "wokwi-pushbutton", "id": "btn1", "top": 200, "left": -180, "attrs": { "color": "green" } }
   ],
   "connections": [
-    [ "esp:TX0", "$serialMonitor:RX", "", [] ],
-    [ "esp:RX0", "$serialMonitor:TX", "", [] ],
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+    [ "oled1:SCL", "esp:22", "green", [] ],
     [ "oled1:SDA", "esp:21", "blue", [] ],
-    [ "oled1:SCL", "esp:22", "cyan", [] ],
+    [ "oled1:GND", "esp:GND.2", "black", [] ],
     [ "oled1:VCC", "esp:3V3", "red", [] ],
-    [ "oled1:GND", "esp:GND.1", "black", [] ],
     [ "dht1:SDA", "esp:4", "green", [] ],
     [ "dht1:VCC", "esp:3V3", "red", [] ],
-    [ "dht1:GND", "esp:GND.1", "black", [] ],
+    [ "dht1:GND", "esp:GND.2", "black", [] ],
     [ "ldr1:AO", "esp:34", "orange", [] ],
     [ "ldr1:VCC", "esp:3V3", "red", [] ],
-    [ "ldr1:GND", "esp:GND.1", "black", [] ],
+    [ "ldr1:GND", "esp:GND.2", "black", [] ],
     [ "mq2:AO", "esp:35", "purple", [] ],
     [ "mq2:VCC", "esp:5V", "red", [] ],
-    [ "mq2:GND", "esp:GND.1", "black", [] ],
+    [ "mq2:GND", "esp:GND.2", "black", [] ],
     [ "btn1:1.l", "esp:15", "yellow", [] ],
-    [ "btn1:2.l", "esp:GND.2", "black", [] ]
+    [ "btn1:2.l", "esp:GND.1", "black", [] ]
   ]
 }
