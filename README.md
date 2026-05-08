@@ -7,14 +7,17 @@ Universidade de Mogi das Cruzes — 2026
 
 ## 📋 Descrição
 
-Estação meteorológica simulada no **Wokwi** com ESP32, sensores DHT22, LDR e MQ-2, display OLED SSD1306 com 4 telas alternáveis via botão, comunicação MQTT via **HiveMQ Cloud** e dashboard **Node-RED** com dados reais da API **OpenWeatherMap** para Suzano/SP.
+Estação meteorológica simulada no **Wokwi** com ESP32, sensores DHT22, LDR e MQ-2, display OLED SSD1306 com 4 telas alternáveis via botão, comunicação MQTT via **HiveMQ Cloud**, dashboard **Node-RED** com dados reais da API **OpenWeatherMap** para Suzano/SP, persistência automática de dados no **Google Sheets** e envio automatizado de **relatório diário por email** via Google Apps Script.
 
 ## 🏗️ Arquitetura
 
 ```
-Wokwi (ESP32 MicroPython) → MQTT → HiveMQ Cloud → Node-RED → Dashboard
-                ↑
-        OpenWeatherMap API (dados reais Suzano/BR)
+Wokwi (ESP32 MicroPython)
+  ├── MQTT → HiveMQ Cloud → Node-RED → Dashboard
+  ├── HTTP → Google Apps Script → Google Sheets  (Etapa 2)
+  └── HTTP → Google Apps Script → Gmail          (Etapa 2)
+        ↑
+  OpenWeatherMap API (dados reais Suzano/BR)
 ```
 
 ## 📁 Estrutura do Repositório
@@ -22,12 +25,14 @@ Wokwi (ESP32 MicroPython) → MQTT → HiveMQ Cloud → Node-RED → Dashboard
 ```
 📦 estacao-meteorologica-iot
  ┣ 📂 codigos-wokwi
- ┃ ┣ 📄 main.py             → Firmware do ESP32 em MicroPython
- ┃ ┣ 📄 ssd1306.py          → Driver do display OLED
- ┃ ┗ 📄 diagram.json        → Conexões dos componentes no Wokwi
+ ┃ ┣ 📄 main.py               → Firmware ESP32 MicroPython (Etapas 1 e 2)
+ ┃ ┣ 📄 ssd1306.py            → Driver do display OLED
+ ┃ ┗ 📄 diagram.json          → Conexões dos componentes no Wokwi
  ┣ 📂 codigos-node-red
- ┃ ┣ 📄 flow_nos.json       → Flow completo para importar no Node-RED
+ ┃ ┣ 📄 flow_nos.json         → Flow completo para importar no Node-RED
  ┃ ┗ 📄 dashboard_layout.html → HTML/CSS do nó Dashboard Visual
+ ┣ 📂 codigos-google
+ ┃ ┗ 📄 apps_script.js        → Código do Google Apps Script (endpoint HTTP)
  ┗ 📄 README.md
 ```
 
@@ -41,6 +46,9 @@ Wokwi (ESP32 MicroPython) → MQTT → HiveMQ Cloud → Node-RED → Dashboard
 | OpenWeatherMap API | v2.5 | Dados climáticos reais |
 | Node-RED | v4.1.8 | Plataforma de automação e dashboard |
 | node-red-dashboard | v3.6.6 | Interface gráfica do dashboard |
+| Google Sheets | — | Persistência de dados em nuvem (Etapa 2) |
+| Google Apps Script | — | Endpoint HTTP para Sheets e Email (Etapa 2) |
+| Gmail / MailApp | — | Envio de relatório diário por email (Etapa 2) |
 
 ## 📡 Sensores e Componentes
 
@@ -55,13 +63,21 @@ Wokwi (ESP32 MicroPython) → MQTT → HiveMQ Cloud → Node-RED → Dashboard
 
 ## ✅ Funcionalidades
 
+### Etapa 1
 - 4 telas no OLED alternadas por botão: Temp/Umidade, Luz/Gás, Conforto e Previsão
 - Alertas visuais no OLED para temperatura extrema (>35°C ou <5°C) e ar contaminado (>70%)
 - Cálculo do índice de conforto térmico pela fórmula de Rothfusz (Heat Index)
-- Previsão do tempo calculada por pressão atmosférica + temperatura sensor com identificação dia/noite via sunrise/sunset da API
+- Previsão do tempo calculada por pressão atmosférica + temperatura com identificação dia/noite
 - Dados reais de Suzano/SP via OpenWeatherMap consultados a cada 5 minutos
 - 12 tópicos MQTT publicados a cada 10 segundos
 - Dashboard Node-RED dark mode com dados em tempo real
+
+### Etapa 2
+- Gravação automática de cada leitura no Google Sheets a cada 30 segundos
+- Planilha com colunas: Data/Hora, Temperatura, Umidade
+- Cálculo da média diária de temperatura e umidade diretamente no ESP32
+- Envio automático de relatório por email com data, médias e quantidade de leituras
+- Google Apps Script como endpoint HTTP intermediário (resolve limitação SSL do Wokwi)
 
 ## 📊 Tópicos MQTT
 
@@ -71,14 +87,14 @@ Wokwi (ESP32 MicroPython) → MQTT → HiveMQ Cloud → Node-RED → Dashboard
 | `estacao/umidade` | Umidade sensor DHT22 (%) |
 | `estacao/luminosidade` | Luminosidade LDR (%) |
 | `estacao/gas` | Qualidade do ar MQ-2 (%) |
-| `estacao/previsao` | Previsão calculada (ex: Noite Nublada, Ensolarado) |
+| `estacao/previsao` | Previsão calculada (ex: Nublado, Ensolarado) |
 | `estacao/conforto` | Índice de conforto (ex: Confortável, Atenção) |
 | `estacao/api/temperatura` | Temperatura real API (°C) |
 | `estacao/api/umidade` | Umidade real API (%) |
 | `estacao/api/pressao` | Pressão atmosférica real (hPa) |
 | `estacao/api/vento` | Velocidade do vento real (km/h) |
 | `estacao/api/sensacao` | Sensação térmica real (°C) |
-| `estacao/api/descricao` | Descrição do clima (ex: nuvens quebradas) |
+| `estacao/api/descricao` | Descrição do clima (ex: céu pouco nublado) |
 
 ---
 
@@ -89,6 +105,7 @@ Wokwi (ESP32 MicroPython) → MQTT → HiveMQ Cloud → Node-RED → Dashboard
 - Conta no [Wokwi](https://wokwi.com)
 - Conta no [HiveMQ Cloud](https://hivemq.com) — plano gratuito
 - Conta no [OpenWeatherMap](https://openweathermap.org) — plano gratuito
+- Conta Google com Gmail e Google Sheets (Etapa 2)
 - [Node.js](https://nodejs.org) instalado (versão LTS)
 - Node-RED: `npm install -g node-red`
 - Dashboard: `cd ~/.node-red && npm install node-red-dashboard`
@@ -101,81 +118,79 @@ Wokwi (ESP32 MicroPython) → MQTT → HiveMQ Cloud → Node-RED → Dashboard
 2. Clique em **Create New Cluster → Free**
 3. Vá em **Access Management → Add Credentials**
 4. Crie um usuário com permissão **PUBLISH_SUBSCRIBE**
-5. Anote: **Cluster URL** (ex: `abc123.hivemq.cloud`), **usuário** e **senha**
+5. Anote: **Cluster URL**, **usuário** e **senha**
 
 ---
 
 ### 2️⃣ Configurar OpenWeatherMap
 
 1. Acesse [openweathermap.org](https://openweathermap.org) e crie uma conta gratuita
-2. Vá em **My Profile → API Keys**
-3. Copie a chave **Default** (Status: Active)
-4. ⚠️ Aguarde até 10 minutos para a chave ativar após criar a conta
+2. Vá em **My Profile → API Keys** e copie a chave **Default**
+3. ⚠️ Aguarde até 10 minutos para a chave ativar
 
 ---
 
-### 3️⃣ Configurar o Wokwi
+### 3️⃣ Configurar Google Sheets e Apps Script (Etapa 2)
 
-1. Acesse [wokwi.com](https://wokwi.com) → **New Project → ESP32**
+1. Acesse [sheets.google.com](https://sheets.google.com) e crie uma planilha
+2. Renomeie a aba para **Leituras** e adicione cabeçalhos: `Data/Hora`, `Temperatura`, `Umidade`
+3. No menu **Extensões → Apps Script**, cole o conteúdo de `codigos-google/apps_script.js`
+4. Execute a função `testarEmail` para autorizar permissões do MailApp
+5. Clique em **Implantar → Nova implantação → App da Web → Qualquer pessoa → Implantar**
+6. Copie a **URL de implantação** gerada
+7. No navegador acesse `http://script.google.com/macros/s/SUA_URL/exec?datetime=teste&temp=25&hum=60` e copie a **URL final** após o redirecionamento (será usada em `EMAIL_URL`)
+
+---
+
+### 4️⃣ Configurar o Wokwi
+
+1. Acesse o projeto: [wokwi.com/projects/463321787155842049](https://wokwi.com/projects/463321787155842049)
 2. Cole o conteúdo de `codigos-wokwi/main.py` na aba de código
-3. Crie uma nova aba chamada `ssd1306.py` e cole o conteúdo do arquivo
-4. Cole o conteúdo de `codigos-wokwi/diagram.json` na aba **diagram.json**
-5. No topo do `main.py` substitua as credenciais:
+3. Crie uma aba `ssd1306.py` e cole o driver
+4. Cole o `diagram.json` na aba correspondente
+5. Substitua as credenciais no topo do `main.py`:
 
 ```python
-MQTT_HOST = "SEU_CLUSTER.hivemq.cloud"  # ← Cluster URL do HiveMQ
-MQTT_USER = "SEU_USUARIO_HIVEMQ"         # ← Usuário criado
-MQTT_PASS = "SUA_SENHA_HIVEMQ"           # ← Senha
-OWM_KEY   = "SUA_API_KEY_OPENWEATHERMAP" # ← API Key
-OWM_CITY  = "SuaCidade,BR"               # ← Sua cidade
+MQTT_HOST  = "SEU_CLUSTER.hivemq.cloud"
+MQTT_USER  = "SEU_USUARIO_HIVEMQ"
+MQTT_PASS  = "SUA_SENHA_HIVEMQ"
+OWM_KEY    = "SUA_API_KEY_OPENWEATHERMAP"
+SHEETS_URL = "http://script.google.com/macros/s/SUA_URL/exec"
+EMAIL_URL  = "https://script.googleusercontent.com/macros/echo?user_content_key=..."
+EMAIL_DEST = "email_destinatario@dominio.com"
+EMAIL_FROM = "SEU_EMAIL@gmail.com"
 ```
 
 6. Clique em **▶ Play** e aguarde ~30 segundos
 
 **✅ Serial Monitor deve mostrar:**
 ```
-I2C scan: [60]
-OLED OK!
 WiFi OK! IP: 10.10.0.2
 MQTT OK!
-API OK! Previsao: Noite Nublada
-DADOS ENVIADOS VIA MQTT
+API OK! Previsao: Nublado
+Sistema iniciado! Aguardando ciclos...
+DHT OK: T=25.0 H=60.0
+DADOS ENVIADOS VIA MQTT | T=25.0 H=60.0
+Salvando Sheets...
+Sheets resp: {"status":"ok","msg":"Dados salvos!"}
+Enviando email via Apps Script...
+Email resp: {"status":"ok","msg":"Email enviado!"}
 ```
 
 ---
 
-### 4️⃣ Configurar Node-RED
+### 5️⃣ Configurar Node-RED
 
-**Instalação e inicialização:**
 ```bash
 node-red
 ```
 Acesse [http://localhost:1880](http://localhost:1880)
 
-**Importar o flow:**
-1. Menu **☰ → Import**
-2. Cole o conteúdo de `codigos-node-red/flow_nos.json`
-3. Clique em **Importar**
-
-**Configurar o broker HiveMQ:**
-1. Clique duas vezes em qualquer nó MQTT (roxo)
-2. Clique no lápis ✏️ ao lado do broker
-3. Configure:
-   - **Servidor:** seu Cluster URL (ex: `abc123.hivemq.cloud`)
-   - **Porta:** `8883`
-   - **TLS:** ativado ✅
-   - Aba **Segurança:** usuário e senha do HiveMQ
-4. Clique em **Atualizar → Concluído**
-
-**Configurar o layout do dashboard:**
-1. Clique duas vezes no nó **"Dashboard Visual"** (azul)
-2. Apague o conteúdo do campo **Template**
-3. Cole todo o conteúdo de `codigos-node-red/dashboard_layout.html`
-4. Clique em **Concluído**
-
-**Implementar:**
-1. Clique em **Implementar** (botão vermelho no canto superior direito)
-2. Acesse o dashboard em [http://localhost:1880/ui](http://localhost:1880/ui)
+1. Menu **☰ → Import** → cole o `flow_nos.json`
+2. Configure o broker HiveMQ (host, porta 8883, TLS, usuário e senha)
+3. No nó **Dashboard Visual**, cole o conteúdo de `dashboard_layout.html`
+4. Clique em **Implementar**
+5. Acesse o dashboard: [http://localhost:1880/ui](http://localhost:1880/ui)
 
 ---
 

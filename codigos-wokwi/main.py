@@ -1,24 +1,27 @@
-import network
-import time
-import dht
-import ujson
-import urequests
+import network, time, dht, ujson, urequests, ussl
+import usocket as socket
 from machine import Pin, ADC, I2C
 from umqtt.simple import MQTTClient
 import ssd1306
 
 # ===================== CONFIGURAÇÕES =====================
-WIFI_SSID     = "Wokwi-GUEST" # No Wokwi use sempre este SSID
-WIFI_PASSWORD = "" # No Wokwi a senha é sempre vazia, mesmo que o roteador virtual mostre uma senha diferente
-MQTT_HOST     = "SEU_CLUSTER.hivemq.cloud" # Substitua pelo host do seu cluster HiveMQ Cloud
-MQTT_PORT     = 8883 # Porta TLS — não altere
-MQTT_USER     = "SEU_USUARIO_HIVEMQ" # Substitua pelo seu usuário do HiveMQ Cloud
-MQTT_PASS     = "SUA_SENHA_HIVEMQ" # Substitua pela sua senha do HiveMQ Cloud
+WIFI_SSID     = "Wokwi-GUEST"
+WIFI_PASSWORD = ""
+MQTT_HOST     = "SEU_CLUSTER.hivemq.cloud"       # ← Substitua pelo seu cluster HiveMQ
+MQTT_PORT     = 8883
+MQTT_USER     = "SEU_USUARIO_HIVEMQ"              # ← Substitua pelo seu usuário
+MQTT_PASS     = "SUA_SENHA_HIVEMQ"                # ← Substitua pela sua senha
 MQTT_CLIENT   = "estacao-mp-003"
-OWM_KEY       = "SUA_API_KEY_OPENWEATHERMAP" # Substitua pela sua API Key do OpenWeatherMap
-OWM_CITY      = "Suzano,BR" # Cidade para dados reais
+OWM_KEY       = "SUA_API_KEY_OPENWEATHERMAP"      # ← Substitua pela sua API Key
+OWM_CITY      = "Suzano,BR"
 
+# ---- Etapa 2: Sheets e Email ----
+SHEETS_URL    = "http://script.google.com/macros/s/SUA_URL_APPS_SCRIPT/exec"  # ← Substitua
+EMAIL_URL     = "https://script.googleusercontent.com/macros/echo?user_content_key=SUA_URL_FINAL"  # ← Substitua pela URL final após redirecionamento
+EMAIL_DEST    = "email_do_professor@dominio.com"  # ← Email do destinatário
+EMAIL_FROM    = "SEU_EMAIL@gmail.com"             # ← Seu Gmail
 
+# ===================== TÓPICOS MQTT =====================
 TOPIC_TEMP     = b"estacao/temperatura"
 TOPIC_UMID     = b"estacao/umidade"
 TOPIC_LUZ      = b"estacao/luminosidade"
@@ -47,24 +50,34 @@ oled = ssd1306.SSD1306_I2C(128, 64, i2c)
 print("OLED OK!")
 
 # ===================== VARIÁVEIS =====================
-temperatura   = 25.0
-umidade       = 60.0
-luminosidade  = 0
-qualidade_ar  = 0
-conforto_str  = "---"
-previsao      = "Carregando..."
-api_temp      = 0.0
-api_umid      = 0.0
-api_pressao   = 0.0
-api_vento     = 0.0
-api_sensacao  = 0.0
-api_descricao = "---"
-api_dt        = 0
-api_sunrise   = 0
-api_sunset    = 0
-tela          = 0
-btn_anterior  = 1
-mqtt_client   = None
+temperatura      = 25.0
+umidade          = 60.0
+luminosidade     = 0
+qualidade_ar     = 0
+conforto_str     = "---"
+previsao         = "Carregando..."
+api_temp         = 0.0
+api_umid         = 0.0
+api_pressao      = 0.0
+api_vento        = 0.0
+api_sensacao     = 0.0
+api_descricao    = "---"
+api_dt           = 0
+api_sunrise      = 0
+api_sunset       = 0
+tela             = 0
+btn_anterior     = 1
+mqtt_client      = None
+ultimo_print_dht = 0
+
+# Acumuladores para média diária
+leituras_temp = []
+leituras_umid = []
+ultimo_email  = -1
+
+# Intervalos
+INTERVALO_SHEETS_MS = 30 * 1000   # Sheets a cada 30s
+INTERVALO_EMAIL_MS  = 45 * 1000   # Email aos 45s (após o Sheets)
 
 # ===================== OLED HELPERS =====================
 def oled_show(l1="", l2="", l3="", l4="", l5="", l6=""):
@@ -107,34 +120,33 @@ def exibir_tela():
 # ===================== WIFI =====================
 def conectar_wifi():
     oled_booting("Conectando WiFi...")
-    print("Conectando WiFi...")
     wlan = network.WLAN(network.STA_IF)
+    wlan.active(False)
+    time.sleep(1)
     wlan.active(True)
+    time.sleep(1)
     wlan.connect(WIFI_SSID, WIFI_PASSWORD)
     tentativas = 0
-    while not wlan.isconnected() and tentativas < 20:
+    while not wlan.isconnected() and tentativas < 40:
         time.sleep(0.5)
-        print(".", end="")
         tentativas += 1
+        print("WiFi tentativa", tentativas)
     if wlan.isconnected():
-        print("\nWiFi OK! IP:", wlan.ifconfig()[0])
+        print("WiFi OK! IP:", wlan.ifconfig()[0])
         oled_booting("WiFi OK!")
     else:
-        print("\nWiFi FALHOU")
+        print("WiFi FALHOU - tentando de novo...")
+        time.sleep(2)
+        conectar_wifi()
 
 # ===================== MQTT =====================
 def conectar_mqtt():
     global mqtt_client
-    oled_booting("Conectando MQTT...")
-    print("Conectando MQTT...")
     try:
         mqtt_client = MQTTClient(
             MQTT_CLIENT, MQTT_HOST,
-            port=MQTT_PORT,
-            user=MQTT_USER,
-            password=MQTT_PASS,
-            ssl=True,
-            ssl_params={"server_hostname": MQTT_HOST}
+            port=MQTT_PORT, user=MQTT_USER, password=MQTT_PASS,
+            ssl=True, ssl_params={"server_hostname": MQTT_HOST}
         )
         mqtt_client.connect()
         print("MQTT OK!")
@@ -152,11 +164,9 @@ def publicar(topico, valor):
 
 # ===================== SENSORES =====================
 def calcular_conforto(t, h):
-    ic = (-8.78469475556
-        + 1.61139411 * t + 2.33854883889 * h
-        - 0.14611605 * t * h - 0.012308094 * t * t
-        - 0.0164248277778 * h * h + 0.002211732 * t * t * h
-        + 0.00072546 * t * h * h - 0.000003582 * t * t * h * h)
+    ic = (-8.78469475556 + 1.61139411*t + 2.33854883889*h
+        - 0.14611605*t*h - 0.012308094*t*t - 0.0164248277778*h*h
+        + 0.002211732*t*t*h + 0.00072546*t*h*h - 0.000003582*t*t*h*h)
     if ic < 26: return "Confortavel"
     if ic < 28: return "Atencao"
     if ic < 30: return "Desconforto"
@@ -165,6 +175,7 @@ def calcular_conforto(t, h):
 
 def ler_sensores():
     global temperatura, umidade, luminosidade, qualidade_ar, conforto_str
+    global leituras_temp, leituras_umid, ultimo_print_dht
     sensor = dht.DHT22(DHT_PIN)
     for _ in range(5):
         try:
@@ -174,7 +185,12 @@ def ler_sensores():
             if t is not None and h is not None:
                 temperatura = t
                 umidade = h
-                print("DHT OK: T={} H={}".format(t, h))
+                leituras_temp.append(t)
+                leituras_umid.append(h)
+                agora = time.ticks_ms()
+                if time.ticks_diff(agora, ultimo_print_dht) > 30000:
+                    print("DHT OK: T={} H={}".format(t, h))
+                    ultimo_print_dht = agora
                 break
         except:
             time.sleep(0.3)
@@ -188,7 +204,6 @@ def ler_sensores():
 def calcular_previsao(pressao):
     e_dia = (api_dt >= api_sunrise and api_dt <= api_sunset)
     diff_temp = abs(temperatura - api_temp)
-    print("E dia:", "Sim" if e_dia else "Nao")
     if pressao >= 1020:
         if diff_temp < 3: return "Ensolarado" if e_dia else "Noite Clara"
         return "Parc. nublado" if e_dia else "Noite Nublada"
@@ -205,8 +220,6 @@ def buscar_previsao():
     global previsao, api_temp, api_umid, api_pressao
     global api_vento, api_sensacao, api_descricao
     global api_dt, api_sunrise, api_sunset
-    oled_booting("Buscando previsao...")
-    print("Buscando previsao...")
     url = ("http://api.openweathermap.org/data/2.5/weather?q={}"
            "&appid={}&units=metric&lang=pt").format(OWM_CITY, OWM_KEY)
     try:
@@ -235,6 +248,46 @@ def buscar_previsao():
         print("Erro API:", e)
         previsao = "Sem dados"
 
+# ===================== GOOGLE SHEETS (Etapa 2) =====================
+def salvar_sheets(dt_str, temp, hum):
+    """Envia leitura para Google Sheets via Apps Script (HTTP GET)"""
+    try:
+        url = "{}?datetime={}&temp={:.2f}&hum={:.2f}".format(
+            SHEETS_URL,
+            dt_str.replace(" ", "%20").replace("/", "%2F").replace(":", "%3A"),
+            temp, hum
+        )
+        print("Salvando Sheets...")
+        r = urequests.get(url, timeout=15)
+        print("Sheets resp:", r.text[:80])
+        r.close()
+        oled_booting("Sheets: OK!")
+    except Exception as e:
+        print("Erro Sheets:", e)
+        oled_booting("Sheets: ERRO")
+
+# ===================== EMAIL (Etapa 2) =====================
+def enviar_email(data_ref, media_temp, media_umid, qtd_leituras):
+    """Envia relatório diário via Google Apps Script"""
+    print("Enviando email via Apps Script...")
+    oled_booting("Enviando email...")
+    try:
+        url = "{}&acao=email&data={}&temp={:.2f}&hum={:.2f}&qtd={}".format(
+            EMAIL_URL,
+            data_ref.replace("/", "%2F"),
+            media_temp, media_umid, qtd_leituras
+        )
+        r = urequests.get(url, timeout=15)
+        print("Email resp:", r.text[:80])
+        r.close()
+        print("Email enviado com sucesso!")
+        oled_booting("Email: OK!")
+        return True
+    except Exception as e:
+        print("Erro email:", e)
+        oled_booting("Email: ERRO")
+        return False
+
 # ===================== ENVIO MQTT =====================
 def enviar_mqtt():
     publicar(TOPIC_TEMP,    "{:.2f}".format(temperatura))
@@ -243,59 +296,78 @@ def enviar_mqtt():
     publicar(TOPIC_GAS,     str(qualidade_ar))
     publicar(TOPIC_PREV,    previsao)
     publicar(TOPIC_CONFORT, conforto_str)
-    print("=============================")
-    print("DADOS ENVIADOS VIA MQTT")
-    print("--- SENSOR (Simulacao) ---")
-    print("Temperatura: {:.2f} C".format(temperatura))
-    print("Umidade:     {:.2f} %".format(umidade))
-    print("Luminosidade:{} %".format(luminosidade))
-    print("Qualidade Ar:{} %".format(qualidade_ar))
-    print("Conforto:    ", conforto_str)
-    print("--- API (Suzano Real) ---")
-    print("Temp Real:   {:.2f} C".format(api_temp))
-    print("Sensacao:    {:.2f} C".format(api_sensacao))
-    print("Umid Real:   {:.1f} %".format(api_umid))
-    print("Pressao:     {:.0f} hPa".format(api_pressao))
-    print("Vento:       {:.1f} km/h".format(api_vento))
-    print("Descricao:   ", api_descricao)
-    print("Previsao:    ", previsao)
-    print("=============================")
+    print("DADOS ENVIADOS VIA MQTT | T={:.1f} H={:.1f}".format(temperatura, umidade))
+
+# ===================== DATA/HORA SIMULADA =====================
+def get_datetime_str(ticks_inicio, ticks_agora):
+    """Data/hora simulada — Wokwi não tem RTC real"""
+    segundos = time.ticks_diff(ticks_agora, ticks_inicio) // 1000
+    h = (10 + segundos // 3600) % 24
+    m = (segundos % 3600) // 60
+    s = segundos % 60
+    return "08/05/2026 {:02d}:{:02d}:{:02d}".format(h, m, s)
 
 # ===================== INICIALIZAÇÃO =====================
 oled_show("Iniciando...", "Estacao Meteoro.", "Suzano SP - BR")
 time.sleep(1)
-
 conectar_wifi()
 time.sleep(1)
 conectar_mqtt()
 time.sleep(1)
 buscar_previsao()
 
+ticks_inicio    = time.ticks_ms()
 ultimo_leitura  = time.ticks_ms()
 ultimo_mqtt     = time.ticks_ms()
 ultimo_previsao = time.ticks_ms()
+ultimo_sheets   = time.ticks_ms()
 
-# ===================== LOOP =====================
+print("Sistema iniciado! Aguardando ciclos...")
+
+# ===================== LOOP PRINCIPAL =====================
 while True:
     agora = time.ticks_ms()
 
+    # Botão — alterna tela do OLED
     btn_atual = BTN_PIN.value()
     if btn_atual == 0 and btn_anterior == 1:
         tela = (tela + 1) % 4
         time.sleep_ms(50)
     btn_anterior = btn_atual
 
+    # Leitura dos sensores a cada 3s
     if time.ticks_diff(agora, ultimo_leitura) > 3000:
         ultimo_leitura = agora
         ler_sensores()
         exibir_tela()
 
+    # MQTT a cada 10s
     if time.ticks_diff(agora, ultimo_mqtt) > 10000:
         ultimo_mqtt = agora
         enviar_mqtt()
 
+    # API OpenWeatherMap a cada 5min
     if time.ticks_diff(agora, ultimo_previsao) > 300000:
         ultimo_previsao = agora
         buscar_previsao()
+
+    # Google Sheets a cada 30s
+    if time.ticks_diff(agora, ultimo_sheets) > INTERVALO_SHEETS_MS:
+        ultimo_sheets = agora
+        dt_str = get_datetime_str(ticks_inicio, agora)
+        salvar_sheets(dt_str, temperatura, umidade)
+
+    # Email aos 45s e depois a cada 45s
+    if time.ticks_diff(agora, ticks_inicio) > INTERVALO_EMAIL_MS:
+        if ultimo_email == -1 or time.ticks_diff(agora, ultimo_email) > INTERVALO_EMAIL_MS:
+            if len(leituras_temp) > 0:
+                media_t = sum(leituras_temp) / len(leituras_temp)
+                media_h = sum(leituras_umid) / len(leituras_umid)
+                qtd = len(leituras_temp)
+                enviou = enviar_email("08/05/2026", media_t, media_h, qtd)
+                if enviou:
+                    ultimo_email = agora
+                    leituras_temp = []
+                    leituras_umid = []
 
     time.sleep_ms(100)
